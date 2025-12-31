@@ -1,11 +1,35 @@
+# Utility: Load lines up to a word cap
+def load_lines_with_word_cap(filename, max_words):
+    lines = []
+    total_words = 0
+    with open(filename, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            word_count = len(line.split())
+            if total_words + word_count > max_words:
+                # Only add up to the word cap
+                allowed = max_words - total_words
+                if allowed > 0:
+                    words = line.split()[:allowed]
+                    lines.append(" ".join(words))
+                break
+            lines.append(line)
+            total_words += word_count
+    return lines
 # compare_samanantar_local_csv.py
 import pickle
 import grapheme
 import regex as re
 import csv
-from bpe import load_bpe
-from gpe import load_gpe
-from GPE_sandhi import load_tokenizer
+from GPE.bpe import load_bpe
+from GPE.gpe import load_gpe
+from GPE.GPE_sandhi import load_tokenizer
+import sys
+import os
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # ------------------ Metrics ------------------
 def compression_ratio(text, num_tokens):
@@ -36,15 +60,19 @@ def evaluate_texts(texts, tokenizers):
 
 # ------------------ Main ------------------
 if __name__ == "__main__":
-    # Load Samanantar Tamil dataset from local file
-    local_file = "data\samanantar_eng_90_percent_cleaned1.txt"
-    with open(local_file, "r", encoding="utf-8") as f:
-        lines = [re.sub(r'\s+', ' ', line.strip()) for line in f if line.strip()]
 
-    # Load pretrained tokenizers (trained on Samanantar)
-    bpe_tok = load_bpe("models\vocab_bpe.pkl", "models\merges_bpe.pkl")
-    gpe_tok = load_gpe("models\vocab_gpe.pkl", "models\merges_gpe.pkl")
-    sandhi_tok = load_tokenizer("models\vocab_re.pkl", "models\merges.pkl")
+    local_file = (
+        r"C:\Users\ROSHINI PRIYA\Downloads\tokenizers-coling2025-main (4)"
+        r"\tokenizers-coling2025-main\data\train_3m.txt"
+    )
+
+    print("Loading ~3M words...")
+    lines = load_lines_with_word_cap(local_file, max_words=3_000_000)
+    print(f"Loaded {len(lines)} lines")
+
+    bpe_tok = load_bpe("vocab_bpe.pkl", "merges_bpe.pkl")
+    gpe_tok = load_gpe("vocab_gpe.pkl", "merges_gpe.pkl")
+    sandhi_tok = load_tokenizer("vocab.pkl", "merges.pkl")
 
     tokenizers = {
         "BPE": bpe_tok,
@@ -52,42 +80,12 @@ if __name__ == "__main__":
         "Sandhi-GPE": sandhi_tok
     }
 
-    # CSV output
-    csv_file = "evaluation_results.csv"
-    header = ["Limit", "Tokenizer", "Avg CR", "Avg FS", "Avg Tokens"]
-    rows = []
+    results = evaluate_texts(lines, tokenizers)
 
-    # Evaluate on multiple limits
-    for limit in [500, 1000, 2000, 3000]:
-        subset = lines[:limit]
-        results = evaluate_texts(subset, tokenizers)
-        print(f"\n--- Evaluating {limit} lines ---")
-        for name, (cr, fs, avg_tokens) in results.items():
-            print(f"{name:<12} Avg CR={cr:.4f} Avg FS={fs:.4f} Avg Tokens={avg_tokens:.2f}")
-            rows.append([limit, name, cr, fs, avg_tokens])
-
-    # Save to CSV
-    with open(csv_file, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(header)
-        writer.writerows(rows)
-
-    print(f"\n✅ Results saved to {csv_file}")
-
-    # ------------------ Print detailed tokenization for a test sentence ------------------
-    test_sentence = "இது ஒரு சோதனை வாக்கியம்"
-    print("\n--- Tokenization details for test sentence ---")
-    for name, tok in tokenizers.items():
-            tokens, ids = tok.encode(test_sentence)
-
-            # Use tokens for decoding (safe fallback if decode() fails)
-            try:
-                decoded = tok.decode(ids)
-            except Exception:
-                decoded = "".join(tokens)
-
-            print(f"\n{name} Results")
-            print("-" * (len(name) + 10))
-            print(f"Tokens       : {tokens}")
-            print(f"Num tokens   : {len(tokens)}")
-            print(f"Decoded text : {decoded}")
+    for name, (cr, fs, avg_tokens) in results.items():
+        print(
+            f"{name:<12} "
+            f"CR={cr:.4f} "
+            f"Fertility={fs:.4f} "
+            f"AvgTokens={avg_tokens:.2f}"
+        )
